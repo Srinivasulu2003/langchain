@@ -311,23 +311,42 @@ class SarvamBatchSTT(BaseModel):
         return response
 
     def wait_for_completion(
-        self, job_id: str, poll_interval: float = 5.0
+        self,
+        job_id: str,
+        poll_interval: float = 5.0,
+        timeout: float = 600.0,
     ) -> dict[str, Any]:
         """Poll until the batch job reaches a terminal state.
 
         Args:
             job_id: The batch job ID.
             poll_interval: Seconds to wait between status checks.
+            timeout: Maximum seconds to wait before raising `TimeoutError`.
 
         Returns:
             The final status dict when `job_state` is `Completed` or
             `Failed`.
+
+        Raises:
+            TimeoutError: If the job does not complete within `timeout` seconds.
         """
+        start = time.time()
         while True:
+            if time.time() - start > timeout:
+                msg = f"Batch STT job {job_id} did not complete within {timeout}s."
+                raise TimeoutError(msg)
             status = self.get_status(job_id)
             if status["job_state"] in ("Completed", "Failed"):
                 return status
             time.sleep(poll_interval)
+
+    def cancel_job(self, job_id: str) -> None:
+        """Cancel a batch STT job.
+
+        Args:
+            job_id: The batch job ID from `create_job`.
+        """
+        self._client.speech_to_text_job.cancel(job_id=job_id)
 
 
 class SarvamTTS(BaseModel):
@@ -432,7 +451,18 @@ class SarvamTTS(BaseModel):
         Returns:
             Dict with `audios` key containing a list of base64-encoded
             audio strings and `request_id`.
+
+        Raises:
+            ValueError: If `text` exceeds 2500 characters or `pace` is
+                outside the range 0.5–2.0.
         """
+        if len(text) > 2500:
+            msg = f"Text exceeds maximum of 2500 characters (got {len(text)})."
+            raise ValueError(msg)
+        effective_pace = pace if pace is not None else self.pace
+        if not 0.5 <= effective_pace <= 2.0:
+            msg = f"pace must be between 0.5 and 2.0, got {effective_pace}."
+            raise ValueError(msg)
         kwargs: dict[str, Any] = {
             "text": text,
             "target_language_code": target_language_code,

@@ -12,6 +12,7 @@ from typing_extensions import Self
 
 _OUTPUT_FORMATS = Literal["md", "html", "json"]
 _JOB_STATES = Literal["Accepted", "Pending", "Running", "Completed", "Failed"]
+_SUPPORTED_EXTENSIONS = frozenset({".pdf", ".png", ".jpg", ".jpeg", ".zip"})
 
 
 class SarvamDocumentIntelligence(BaseModel, BaseLoader):
@@ -76,6 +77,9 @@ class SarvamDocumentIntelligence(BaseModel, BaseLoader):
 
     poll_interval: float = 5.0
     """Seconds between status poll requests."""
+
+    poll_timeout: float = 600.0
+    """Maximum seconds to wait for the job to complete before raising `TimeoutError`."""
 
     api_subscription_key: SecretStr | None = Field(default=None)
     """Sarvam API subscription key. Reads from `SARVAM_API_KEY`."""
@@ -163,7 +167,7 @@ class SarvamDocumentIntelligence(BaseModel, BaseLoader):
 
         import httpx  # noqa: PLC0415
 
-        with httpx.Client() as client:
+        with httpx.Client(timeout=60.0) as client:
             for path in file_paths:
                 filename = os.path.basename(path)
                 url_info = upload_urls.get(filename)
@@ -190,8 +194,18 @@ class SarvamDocumentIntelligence(BaseModel, BaseLoader):
 
         Returns:
             Final status dict with `job_state`, `total_pages`, etc.
+
+        Raises:
+            TimeoutError: If the job does not complete within `poll_timeout` seconds.
         """
+        start = time.time()
         while True:
+            if time.time() - start > self.poll_timeout:
+                msg = (
+                    f"Document Intelligence job {job_id} did not complete "
+                    f"within {self.poll_timeout}s."
+                )
+                raise TimeoutError(msg)
             response = self._client.document_intelligence.get_status(job_id=job_id)
             if not isinstance(response, dict):
                 response = response.model_dump()
@@ -277,6 +291,15 @@ class SarvamDocumentIntelligence(BaseModel, BaseLoader):
             RuntimeError: If the digitization job fails.
         """
         import os  # noqa: PLC0415
+
+        for path in self.file_paths:
+            ext = os.path.splitext(path)[1].lower()
+            if ext not in _SUPPORTED_EXTENSIONS:
+                msg = (
+                    f"Unsupported file type '{ext}' for file '{path}'. "
+                    f"Supported formats: {sorted(_SUPPORTED_EXTENSIONS)}."
+                )
+                raise ValueError(msg)
 
         filenames = [os.path.basename(p) for p in self.file_paths]
 

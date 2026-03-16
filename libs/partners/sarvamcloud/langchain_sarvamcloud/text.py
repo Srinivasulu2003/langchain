@@ -160,7 +160,17 @@ class SarvamTranslator(BaseModel):
 
         Returns:
             Dict with `translated_text`, `source_language_code`, `request_id`.
+
+        Raises:
+            ValueError: If `text` exceeds the model character limit.
         """
+        max_chars = 1000 if self.model == "mayura:v1" else 2000
+        if len(text) > max_chars:
+            msg = (
+                f"Text exceeds maximum of {max_chars} characters for "
+                f"model '{self.model}' (got {len(text)})."
+            )
+            raise ValueError(msg)
         kwargs: dict[str, Any] = {
             "input": text,
             "source_language_code": source_language_code,
@@ -290,8 +300,12 @@ class SarvamTransliterator(BaseModel):
 
         Raises:
             ValueError: If both source and target are non-English Indic
-                languages (Indic-to-Indic not supported).
+                languages (Indic-to-Indic not supported), or if `text`
+                exceeds 1000 characters.
         """
+        if len(text) > 1000:
+            msg = f"Text exceeds maximum of 1000 characters (got {len(text)})."
+            raise ValueError(msg)
         non_english_source = source_language_code != "en-IN"
         non_english_target = target_language_code != "en-IN"
         if non_english_source and non_english_target:
@@ -394,7 +408,13 @@ class SarvamLanguageDetector(BaseModel):
             Dict with nullable fields: `language_code` (BCP-47),
             `script_code` (ISO 15924), `confidence` (0.0–1.0),
             and non-nullable `request_id`.
+
+        Raises:
+            ValueError: If `text` exceeds 1000 characters.
         """
+        if len(text) > 1000:
+            msg = f"Text exceeds maximum of 1000 characters (got {len(text)})."
+            raise ValueError(msg)
         response = self._client.text.identify_language(input=text)
         if not isinstance(response, dict):
             return response.model_dump()
